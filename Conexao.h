@@ -4,135 +4,99 @@
 #include <ArduinoJson.h>
 
 WebServer server(80);
-String comandoRecebido;
+char comandoRecebido[20];
 
-bool VerificaConecao(bool detalhes = false) {
-  if (WiFi.status() == WL_CONNECTED) {
-    if (detalhes) {
-      Serial.println("\nConectado ao Wi-Fi!");
-      Serial.print("Endereço IP: ");
-      Serial.println(WiFi.localIP());
-    }
-
-    return true;
-  } else {
+bool verificaConexao(bool detalhes = false) {
+    if (WiFi.status() == WL_CONNECTED) {
+        if (detalhes) {
+            Serial.println("\nConectado ao Wi-Fi!");
+            Serial.print("Endereço IP: ");
+            Serial.println(WiFi.localIP());
+        }
+        return true;
+    } 
     Serial.println("\nFalha ao conectar ao Wi-Fi. Verifique as credenciais.");
     return false;
-  }
 }
 
-void acessarApiEX() {
-  if (WiFi.status() == WL_CONNECTED) {  // Certifique-se de que o Wi-Fi está conectado
-    HTTPClient http;
 
-    String url = "https://jsonplaceholder.typicode.com/todos/1";
-    http.begin(url);                    // Inicializa a conexão HTTP
-    int httpResponseCode = http.GET();  // Faz a requisição GET
+void executarComandos(const char* comando) {
+    if (comando[0] == '\0') return;  // Se estiver vazio, retorna
 
-    if (httpResponseCode > 0) {
-      Serial.print("Código de resposta HTTP: ");
-      Serial.println(httpResponseCode);
+    if (strcmp(comando, "TEMP") == 0) {
+        StaticJsonDocument<200> jsonDoc;
+        jsonDoc["temperatura"] = readDHTTemperature();
+        
+        char jsonString[100];  // Buffer fixo para JSON
+        serializeJson(jsonDoc, jsonString, sizeof(jsonString));
 
-      String resposta = http.getString();  // Obtem o corpo da resposta
-      Serial.println("Resposta da API:");
-      Serial.println(resposta);
-    } else {
-      Serial.print("Erro ao fazer a requisição: ");
-      Serial.println(httpResponseCode);
+        Serial.println("Comando: Temp");
+        server.send(200, "application/json", jsonString);
+    } 
+    else {
+        Serial.println("Comando desconhecido");
     }
-
-    http.end();  // Fecha a conexão HTTP
-  } else {
-    Serial.println("Erro: Não conectado ao Wi-Fi");
-  }
-}
-
-// Função para processar comandos recebidos
-void executarComandos(String comando) {
-  if(comando == "") {return ;}
-
-  if(comando == "TEMP")
-  {
-    StaticJsonDocument<200> jsonDoc;
-    jsonDoc["temperatura"] = readDHTTemperature();
-
-    String jsonString;
-    serializeJson(jsonDoc, jsonString);
-
-    Serial.println("Comando: Temp");
-    server.send(200, "application/json", jsonString);   
-  } 
-  else if (comando == "LIGAR_LED") {
     
-  } else {
-    Serial.println("Comando desconhecido");
-  }
-  
-  comandoRecebido = "";
+    comandoRecebido[0] = '\0';  // Limpa o buffer
 }
 
-void executarMensagem(String texto){
-  paraScrenPadrao();
-
-  const char* textoConvertido = texto.c_str();
-
-  asyncEscreverTextoDisplay(textoConvertido);
+void executarMensagem(const char* texto, int size = 2) {
+    paraScrenPadrao();
+    asyncEscreverTextoDisplay(texto, size);
 }
 
-// Configura os endpoints HTTP
 void configurarEndpoints() {
-  // Endpoint para receber comandos via GET
-  server.on("/comando", HTTP_GET, []() {
+    server.on("/comando", HTTP_GET, []() {
+        if (server.hasArg("cmd")) { 
+            strncpy(comandoRecebido, server.arg("cmd").c_str(), sizeof(comandoRecebido) - 1);
+            executarComandos(comandoRecebido);
+        } else {
+            server.send(400, "text/plain", "Comando não encontrado!");
+        }
+    });
 
-    if (server.hasArg("cmd")) {  // Verifica se o parâmetro 'cmd' está presente
-      comandoRecebido = server.arg("cmd");  // Lê o valor do parâmetro
-      executarComandos(comandoRecebido);     // Executa o comando
-    } else {
-      server.send(400, "text/plain", "Comando não encontrado!");
-    }
+    server.on("/status", HTTP_GET, []() {
+        server.send(200, "text/plain", "Servidor está online!");
+    });
 
-  });
+    server.on("/msg", HTTP_GET, []() {
+        if (server.hasArg("mensagem")) {
+            char mensagem[100];
+            char sizeStr[5];
 
-  // Endpoint de status (opcional)
-  server.on("/status", HTTP_GET, []() {
-    server.send(200, "text/plain", "Servidor está online!");
-  });
+            strncpy(mensagem, server.arg("mensagem").c_str(), sizeof(mensagem) - 1);
+            strncpy(sizeStr, server.arg("size").c_str(), sizeof(sizeStr) - 1);
 
-  server.on("/msg", HTTP_GET, []() {
-    if (server.hasArg("mensagem")) {
-      String mensagem = server.arg("mensagem"); 
+            int size = atoi(sizeStr);
+            if (size <= 0) {
+                server.send(400, "text/plain", "Erro: parâmetro 'size' inválido!");
+                return;
+            }
 
-      executarMensagem(mensagem);
+            executarMensagem(mensagem, size);
+            server.send(200, "text/plain", "Mensagem executada");
+        } else {
+            server.send(400, "text/plain", "Mensagem não encontrada!");
+        }
+    });
 
-      server.send(200, "text/plain", "Mensagem executada");
-    } else {
-      server.send(400, "text/plain", "Mensagem não encontrado!");
-    }
-  });
-
-  // Endpoint para lidar com páginas inexistentes
-  server.onNotFound([]() {
-    server.send(404, "text/plain", "Página não encontrada!");
-  });
+    server.onNotFound([]() {
+        server.send(404, "text/plain", "Página não encontrada!");
+    });
 }
+
 
 void inicializarConexao() {
-  Serial.println("Inicializando conexão Wi-Fi...");
-  WiFi.begin(ssid, password);
+    Serial.println("Inicializando conexão Wi-Fi...");
+    WiFi.begin(ssid, password);
 
-  int tentativas = 0;                                         // Contador de tentativas
-  while (WiFi.status() != WL_CONNECTED && tentativas < 20) {  // Máximo de 20 tentativas
-    delay(500);
-    Serial.print(".");
-    tentativas++;
-  }
+    for (int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) {
+        delay(500);
+        Serial.print(".");
+    }
 
-  VerificaConecao(true);
-
-  // Configura os endpoints
-  configurarEndpoints();
-
-  // Inicia o servidor
-  server.begin();
-  Serial.println("Servidor iniciado!");
+    verificaConexao(true);
+    configurarEndpoints();
+    server.begin();
+    Serial.println("Servidor iniciado!");
 }

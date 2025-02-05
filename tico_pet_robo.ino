@@ -1,5 +1,6 @@
-#include <Config.h> //Precisa substituir os dados do arquivo Config_ex.h
+#include <Config.h> // Precisa substituir os dados do arquivo Config_ex.h
 #include <Visor.h>
+
 
 bool botPiscando = true;         // Controla a execução da Tarefa 1
 TaskHandle_t task1Handle = NULL; // Handle para gerenciar a Tarefa 1
@@ -7,55 +8,56 @@ TaskHandle_t task1Handle = NULL; // Handle para gerenciar a Tarefa 1
 int TempoInativoDisplay = 0;                // Variável compartilhada entre tarefas
 SemaphoreHandle_t mutexTempoInativoDisplay; // Mutex para proteger acesso a `TempoInativoDisplay`
 
-void screnPadrao()
-{
-  xTaskCreatePinnedToCore(
-      task1,        // Função da tarefa
-      "Tarefa 1",   // Nome da tarefa
-      2048,         // Tamanho da pilha
-      NULL,         // Parâmetro passado para a tarefa
-      1,            // Prioridade da tarefa
-      &task1Handle, // Handle da tarefa
-      0             // Núcleo 0
-  );
-}
-
-void paraScrenPadrao()
-{
-
-  TempoInativoDisplay = 30;
-
-  // Protege o acesso à variável `TempoInativoDisplay`
-  if (xSemaphoreTake(mutexTempoInativoDisplay, portMAX_DELAY))
-  {
-
-    botPiscando = false; // Finaliza a tarefa 1
-    if (task1Handle != NULL)
-    {
-      vTaskDelete(task1Handle); // Garante que a tarefa seja deletada
-      task1Handle = NULL;
-    }
-  }
-}
-
-// Tarefa apenas de piscar
 void task1(void *parameter)
 {
   while (true)
   {
     if (!botPiscando)
     {
-      // Serial.println("Tarefa 1 finalizada.");
       vTaskDelete(NULL); // Encerra a tarefa
     }
 
-    // Serial.println("Executando Tarefa 1");
     asyncPiscar();                        // Depende de inicializarLCD() no setup
-    vTaskDelay(500 / portTICK_PERIOD_MS); // Aguarda 1/2 segundo
+    vTaskDelay(pdMS_TO_TICKS(500)); // Aguarda 1/2 segundo
   }
 }
 
-// Tarefas diversas
+void iniciarTask1()
+{
+  if (task1Handle == NULL) // Garante que a tarefa não seja recriada desnecessariamente
+  {
+    xTaskCreatePinnedToCore(
+        task1,        // Função da tarefa
+        "Tarefa 1",   // Nome da tarefa
+        2048,         // Tamanho da pilha
+        NULL,         // Parâmetro passado para a tarefa
+        1,            // Prioridade da tarefa
+        &task1Handle, // Handle da tarefa
+        0             // Núcleo 0
+    );
+  }
+}
+
+void paraScrenPadrao()
+{
+  if (xSemaphoreTake(mutexTempoInativoDisplay, portMAX_DELAY))
+  {
+    TempoInativoDisplay = 30;
+
+    if (botPiscando) // Evita manipulação desnecessária
+    {
+      botPiscando = false; // Finaliza a tarefa 1
+
+      if (task1Handle != NULL)
+      {
+        vTaskDelete(task1Handle); // Garante que a tarefa seja deletada
+        task1Handle = NULL;
+      }
+    }
+
+    xSemaphoreGive(mutexTempoInativoDisplay);
+  }
+}
 
 #include <Arduino.h>
 #include <Temp_Umid.h>
@@ -65,25 +67,24 @@ void task2(void *parameter)
 {
   while (true)
   {
-    // Serial.println("Executando Tarefa 2");
-
     server.handleClient();
 
-    if (TempoInativoDisplay > 0)
+    if (xSemaphoreTake(mutexTempoInativoDisplay, portMAX_DELAY))
     {
-      if (TempoInativoDisplay == 1)
+      if (TempoInativoDisplay > 0)
       {
-        // Simulação: reinicia a Tarefa 1 após 5 segundos
-        // vTaskDelay(5000 / portTICK_PERIOD_MS);
-        botPiscando = true;
-        screnPadrao();
-      }
+        if (TempoInativoDisplay == 1 && !botPiscando)
+        {
+          botPiscando = true;
+          iniciarTask1();
+        }
 
-      TempoInativoDisplay--;
-      xSemaphoreGive(mutexTempoInativoDisplay); // Libera o mutex
+        TempoInativoDisplay--;
+      }
+      xSemaphoreGive(mutexTempoInativoDisplay);
     }
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS); // Aguarda 1 segundo
+    vTaskDelay(pdMS_TO_TICKS(1000)); // Aguarda 1 segundo
   }
 }
 
@@ -92,7 +93,6 @@ void setup()
   Serial.begin(115200);
   inicializarConexao();
   inicializarLCD();
-
   dht.begin();
 
   // Inicializa o mutex
@@ -105,13 +105,13 @@ void setup()
   }
 
   // Cria a Tarefa 1 no núcleo 0
-  screnPadrao();
+  iniciarTask1();
 
   // Cria a Tarefa 2 no núcleo 1
   xTaskCreatePinnedToCore(
       task2,      // Função da tarefa
       "Tarefa 2", // Nome da tarefa
-      4086,       // Tamanho da pilha
+      4096,       // Tamanho da pilha (reduzido para otimizar memória)
       NULL,       // Parâmetro passado para a tarefa
       1,          // Prioridade da tarefa
       NULL,       // Handle da tarefa (opcional)

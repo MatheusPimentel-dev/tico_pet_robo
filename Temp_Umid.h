@@ -1,40 +1,28 @@
 #include <Adafruit_Sensor.h>
-
 #include <DHT.h>
 #include <DHT_U.h>
 
 #define DHTPIN 27
-#define DHTTYPE    DHT11  
-
+#define DHTTYPE DHT11  
 
 DHT dht(DHTPIN, DHTTYPE);
 
-String readDHTTemperature() {
-  // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
-  // Read temperature as Celsius (the default)
+
+float readDHTTemperature() {
+
   float t = dht.readTemperature();
-  // Read temperature as Fahrenheit (isFahrenheit = true)
-  //float t = dht.readTemperature(true);
-  // Check if any reads failed and exit early (to try again).
   if (isnan(t)) {    
-    Serial.println("Failed to read from DHT sensor!");
-    return "--";
+    Serial.println("Erro ao ler o sensor DHT!");
+    return 0.0;
   }
-  else {
-    Serial.println(t);
-    return String(t);
-  }
+  return t;
 }
 
-String readDHTHumidity() {
-  // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+float readDHTHumidity() {
   float h = dht.readHumidity();
   if (isnan(h)) {
-    Serial.println("Failed to read from DHT sensor!");
-    return "--";
+    Serial.println("Erro ao ler o sensor DHT!");
+    return 0.0;
   }
-  else {
-    Serial.println(h);
-    return String(h);
-  }
+  return h;
 }
